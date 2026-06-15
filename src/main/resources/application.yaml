@@ -1,0 +1,13 @@
+spring:
+  application:
+    name: ai-code-review-system
+
+  datasource:
+    url: jdbc:postgresql://localhost:5432/ai_code_review
+    username: harsh
+    password: ""
+
+  jpa:
+    hibernate:
+      ddl-auto: create
+    show-sql: true
