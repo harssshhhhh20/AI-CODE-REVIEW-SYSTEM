@@ -1,9 +1,11 @@
 package com.harsh.ai_code_review_system.controller;
 
+import com.harsh.ai_code_review_system.dto.CreateUserRequest;
+import com.harsh.ai_code_review_system.dto.UserResponse;
 import com.harsh.ai_code_review_system.entity.User;
 import com.harsh.ai_code_review_system.service.UserService;
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
-import com.harsh.ai_code_review_system.service.UserService;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -14,8 +16,8 @@ import java.util.List;
 public class UserController {
     private final UserService userService;
     @PostMapping
-    public User createUser(@RequestBody User user){
-        return userService.createUser(user);
+    public UserResponse createUser(@Valid @RequestBody CreateUserRequest request){
+        return userService.createUser(request);
     }
 
     @GetMapping

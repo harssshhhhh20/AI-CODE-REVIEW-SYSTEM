@@ -1,5 +1,7 @@
 package com.harsh.ai_code_review_system.service;
 
+import com.harsh.ai_code_review_system.dto.CreateUserRequest;
+import com.harsh.ai_code_review_system.dto.UserResponse;
 import com.harsh.ai_code_review_system.entity.User;
 import com.harsh.ai_code_review_system.repository.UserRepo;
 import com.harsh.ai_code_review_system.repository.UserRepo;
@@ -13,8 +15,20 @@ import java.util.List;
 
 public class UserService {
     private final UserRepo userRepo;
-    public User createUser(User user){
-        return userRepo.save(user);
+    public UserResponse createUser(CreateUserRequest request){
+        User user = User.builder()
+                .githubId(request.githubId())
+                .username(request.username())
+                .email(request.email())
+                .build();
+
+        User savedUser = userRepo.save(user);
+
+        return new UserResponse(
+                savedUser.getId(),
+                savedUser.getUsername(),
+                savedUser.getEmail()
+        );
     }
     public List<User> getAllUser(){
         return userRepo.findAll();

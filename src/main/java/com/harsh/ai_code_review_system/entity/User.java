@@ -1,5 +1,7 @@
 package com.harsh.ai_code_review_system.entity;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
+import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
 import  lombok.*;
 
@@ -18,7 +20,7 @@ public class User {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    private Long githubId;
+    private String githubId;
 
     private String username;
 
