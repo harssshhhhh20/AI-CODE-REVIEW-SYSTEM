@@ -24,4 +24,9 @@ public class UserController {
     public List<User> getUsers(){
         return userService.getAllUser();
     }
+
+    @GetMapping("/me")
+    public UserResponse getCurrentUser() {
+        return userService.getCurrentUser();
+    }
 }

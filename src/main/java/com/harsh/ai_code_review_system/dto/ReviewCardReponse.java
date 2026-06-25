@@ -2,6 +2,7 @@ package com.harsh.ai_code_review_system.dto;
 
 public record ReviewCardReponse(
         Long id,
+        Integer prNumber,
         Integer qualityScore,
         String status,
         String summary,
@@ -11,6 +12,7 @@ public record ReviewCardReponse(
         Integer lowCount,
         Boolean cacheHit,
         Long responseTimeMs,
-        String modelName
+        String modelName,
+        Long repositoryId
 ) {
 }

@@ -19,36 +19,6 @@ public class OpenRouterService {
     private final RestClient restClient;
     private final OpenRouterProperties properties;
 
-    public String testConnection() {
-
-        OpenRouterRequest request =
-                new OpenRouterRequest(
-                        properties.getModel(),
-                        List.of(
-                                new OpenRouterMessage(
-                                        "user",
-                                        "Say hello from Nemotron in one sentence."
-                                )
-                        )
-                );
-
-        OpenRouterResponse response =
-                restClient.post()
-                        .uri("https://openrouter.ai/api/v1/chat/completions")
-                        .header("Authorization",
-                                "Bearer " + properties.getApiKey())
-                        .header("Content-Type", "application/json")
-                        .body(request)
-                        .retrieve()
-                        .body(OpenRouterResponse.class);
-
-        return response
-                .choices()
-                .get(0)
-                .message()
-                .content();
-    }
-
     public String reviewPullRequest(
             String title,
             String author,

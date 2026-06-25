@@ -23,6 +23,16 @@ public interface ReviewRepository extends JpaRepository<Review,Long> {
 
     List<Review> findByCacheHitFalse();
 
+    long countByPullRequestRepositoryUserId(Long userId);
+
+    long countByPullRequestRepositoryUserIdAndCacheHitTrue(Long userId);
+
+    List<Review> findByPullRequestRepositoryUserIdAndCacheHitFalse(Long userId);
+
+    List<Review> findByPullRequestRepositoryUserIdOrderByIdDesc(
+            Long userId
+    );
+
     long countByPullRequestRepositoryId(
             Long repositoryId
     );
@@ -36,6 +46,10 @@ public interface ReviewRepository extends JpaRepository<Review,Long> {
     );
 
     List<Review> findByPullRequestRepositoryIdOrderByIdAsc(
+            Long repositoryId
+    );
+
+    List<Review> findByPullRequestRepositoryIdOrderByIdDesc(
             Long repositoryId
     );
 

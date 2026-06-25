@@ -37,4 +37,13 @@ public class ReviewController {
         return reviewProcessingService.getAllReviews();
 
     }
+
+    @GetMapping("/repositories/{repositoryId}")
+    public List<ReviewCardReponse> getReviewsByRepository(
+            @PathVariable Long repositoryId
+    ) {
+        return reviewProcessingService.getReviewsByRepository(
+                repositoryId
+        );
+    }
 }

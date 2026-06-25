@@ -2,19 +2,17 @@ package com.harsh.ai_code_review_system.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.harsh.ai_code_review_system.dto.*;
+import com.harsh.ai_code_review_system.entity.PullRequest;
 import com.harsh.ai_code_review_system.entity.Review;
 import com.harsh.ai_code_review_system.entity.ReviewComment;
+import com.harsh.ai_code_review_system.entity.User;
+import com.harsh.ai_code_review_system.repository.PullRequestRepository;
 import com.harsh.ai_code_review_system.repository.ReviewCommentRepository;
 import com.harsh.ai_code_review_system.repository.ReviewRepository;
 import lombok.RequiredArgsConstructor;
-import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import com.harsh.ai_code_review_system.dto.SeverityResponse;
-import com.harsh.ai_code_review_system.dto.TopProblemFileResponse;
 
-import java.util.Comparator;
-import java.util.Map;
-import java.util.stream.Collectors;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -32,8 +30,12 @@ public class ReviewProcessingService {
     private final DiffFilterService diffFilterService;
     private final ReviewCacheService reviewCacheService;
     private final RedisLockService redisLockService;
+    private final RepositoryService repositoryService;
+    private final UserService userService;
+    private final PullRequestRepository pullRequestRepository;
+    private final ReviewMetricsService reviewMetricsService;
 
-    @Async
+
     public void processReview(Long reviewId) {
 
         System.out.println("Processing review in thread: " + Thread.currentThread().getName());
@@ -41,12 +43,16 @@ public class ReviewProcessingService {
         Review review = reviewRepository.findById(reviewId)
                 .orElseThrow(() ->
                         new RuntimeException("Review not found"));
+
         String diffHash = hashService.generateHash(
                 review.getPullRequest().getDiff()
         );
+
         CachedReviewResponse cachedResponse = reviewCacheService.get(diffHash);
+
         if (cachedResponse != null) {
             System.out.println("Redis cache hit");
+
             review.setQualityScore(cachedResponse.qualityScore());
             review.setSummary(cachedResponse.summary());
             review.setRawResponse(cachedResponse.rawResponse());
@@ -55,22 +61,31 @@ public class ReviewProcessingService {
             review.setStatus("COMPLETED");
             review.setCacheHit(true);
             review.setDiffHash(diffHash);
-            reviewRepository.save(review);
 
-            Review cachedReview =
-                    reviewRepository.findTopByDiffHashAndStatusOrderByIdDesc(diffHash, "COMPLETED").orElse(null);
+            reviewRepository.save(review);
+            reviewMetricsService.incrementCompleted();
+
+            Review cachedReview = reviewRepository
+                    .findTopByDiffHashAndStatusOrderByIdDesc(diffHash, "COMPLETED")
+                    .orElse(null);
+
             if (cachedReview != null) {
-                List<ReviewComment> comments = reviewCommentRepository.findByReview(cachedReview);
+                List<ReviewComment> comments =
+                        reviewCommentRepository.findByReview(cachedReview);
                 review.setComments(comments);
             }
+
             postGithubReview(review);
             return;
         }
+
         if (!redisLockService.acquireLock(diffHash)) {
             System.out.println("Another thread is already processing this review.");
             return;
         }
+
         try {
+
             Review cachedReview = reviewRepository
                     .findTopByDiffHashAndStatusOrderByIdDesc(
                             diffHash,
@@ -80,7 +95,9 @@ public class ReviewProcessingService {
 
             if (cachedReview != null
                     && !cachedReview.getId().equals(reviewId)) {
+
                 System.out.println("Using cached review");
+
                 review.setQualityScore(cachedReview.getQualityScore());
                 review.setSummary(cachedReview.getSummary());
                 review.setStatus("COMPLETED");
@@ -89,10 +106,15 @@ public class ReviewProcessingService {
                 review.setRawResponse(cachedReview.getRawResponse());
                 review.setModelName(cachedReview.getModelName());
                 review.setResponseTimeMs(cachedReview.getResponseTimeMs());
+
                 List<ReviewComment> cachedComments =
                         reviewCommentRepository.findByReview(cachedReview);
+
                 review.setComments(cachedComments);
+
                 reviewRepository.save(review);
+                reviewMetricsService.incrementCompleted();
+
                 reviewCacheService.save(
                         diffHash,
                         new CachedReviewResponse(
@@ -103,30 +125,51 @@ public class ReviewProcessingService {
                                 cachedReview.getModelName()
                         )
                 );
+
                 postGithubReview(review);
                 return;
             }
+
             try {
+
                 System.out.println("Calling OpenRouter...");
+
                 long startTime = System.currentTimeMillis();
-                String filteredDiff = diffFilterService.filterDiff(review.getPullRequest().getDiff());
-                String aiReview = openRouterService.reviewPullRequest(
+
+                String filteredDiff =
+                        diffFilterService.filterDiff(
+                                review.getPullRequest().getDiff()
+                        );
+
+                String aiReview =
+                        openRouterService.reviewPullRequest(
                                 review.getPullRequest().getTitle(),
                                 review.getPullRequest().getAuthor(),
                                 filteredDiff
-                            );
-                long responseTime = System.currentTimeMillis() - startTime;
+                        );
+
+                long responseTime =
+                        System.currentTimeMillis() - startTime;
+
                 review.setResponseTimeMs(responseTime);
                 review.setModelName("nvidia/nemotron-nano-9b-v2:free");
                 review.setRawResponse(aiReview);
+
                 AiReviewResult result =
-                        objectMapper.readValue(aiReview, AiReviewResult.class);
+                        objectMapper.readValue(
+                                aiReview,
+                                AiReviewResult.class
+                        );
+
                 review.setQualityScore(result.qualityScore());
                 review.setSummary(result.summary());
                 review.setStatus("COMPLETED");
                 review.setCacheHit(false);
                 review.setDiffHash(diffHash);
+
                 reviewRepository.save(review);
+                reviewMetricsService.incrementCompleted();
+
                 reviewCacheService.save(
                         diffHash,
                         new CachedReviewResponse(
@@ -137,10 +180,12 @@ public class ReviewProcessingService {
                                 review.getModelName()
                         )
                 );
-                List<ReviewComment> comments =
-                        new ArrayList<>();
+
+                List<ReviewComment> comments = new ArrayList<>();
+
                 if (result.issues() != null) {
                     for (AiIssue issue : result.issues()) {
+
                         ReviewComment comment =
                                 ReviewComment.builder()
                                         .severity(issue.severity())
@@ -149,26 +194,29 @@ public class ReviewProcessingService {
                                         .lineNumber(issue.lineNumber())
                                         .review(review)
                                         .build();
+
                         reviewCommentRepository.save(comment);
                         comments.add(comment);
                     }
                 }
 
                 review.setComments(comments);
+
                 postGithubReview(review);
+
             } catch (Exception e) {
 
                 e.printStackTrace();
 
                 review.setSummary(
-                        "AI review failed: "
-                                + e.getMessage()
+                        "AI review failed: " + e.getMessage()
                 );
                 review.setCacheHit(false);
                 review.setStatus("FAILED");
                 review.setDiffHash(diffHash);
 
                 reviewRepository.save(review);
+                reviewMetricsService.incrementFailed();
             }
 
         } finally {
@@ -183,6 +231,11 @@ public class ReviewProcessingService {
                         new RuntimeException(
                                 "Review Not Found"
                         ));
+        repositoryService.getOwnedRepository(
+                review.getPullRequest()
+                        .getRepository()
+                        .getId()
+        );
 
         int highCount = (int) review.getComments()
                 .stream()
@@ -283,8 +336,26 @@ public class ReviewProcessingService {
                 githubComment.toString()
         );
     }
-    public List<ReviewHistoryResponse> getReviewHistory(Long pullRequestId){
-        return reviewRepository.findByPullRequestIdOrderByIdDesc(pullRequestId)
+    public List<ReviewHistoryResponse> getReviewHistory(
+            Long pullRequestId
+    ) {
+
+        PullRequest pullRequest =
+                pullRequestRepository.findById(
+                        pullRequestId
+                ).orElseThrow(() ->
+                        new RuntimeException(
+                                "Pull request not found"
+                        ));
+
+        repositoryService.getOwnedRepository(
+                pullRequest.getRepository().getId()
+        );
+
+        return reviewRepository
+                .findByPullRequestIdOrderByIdDesc(
+                        pullRequestId
+                )
                 .stream()
                 .map(review -> new ReviewHistoryResponse(
                         review.getId(),
@@ -295,35 +366,39 @@ public class ReviewProcessingService {
                         review.getModelName()
                 ))
                 .toList();
-
     }
     public AnalyticsResponseSummary getAnalyticsSummary() {
 
-        long totalReviews = reviewRepository.countBy();
+        User user =
+                userService.getCurrentAuthenticatedUser();
 
-        long cacheHits = reviewRepository.countByCacheHitTrue();
+        Long userId = user.getId();
 
-        List<Review> aiReviews = reviewRepository.findByCacheHitFalse();
+        long totalReviews =
+                reviewRepository.countByPullRequestRepositoryUserId(userId);
+
+        long cacheHits =
+                reviewRepository
+                        .countByPullRequestRepositoryUserIdAndCacheHitTrue(userId);
+
+        List<Review> aiReviews =
+                reviewRepository
+                        .findByPullRequestRepositoryUserIdAndCacheHitFalse(userId);
 
         double averageResponseTime = 0.0;
 
         if (!aiReviews.isEmpty()) {
-            averageResponseTime =
-                    aiReviews.stream()
-                            .mapToLong(
-                                    Review::getResponseTimeMs
-                            )
-                            .average()
-                            .orElse(0.0);
+            averageResponseTime = aiReviews.stream()
+                    .mapToLong(Review::getResponseTimeMs)
+                    .average()
+                    .orElse(0.0);
         }
 
         double cacheHitRate = 0.0;
 
         if (totalReviews > 0) {
-
             cacheHitRate =
-                    (cacheHits * 100.0)
-                            / totalReviews;
+                    (cacheHits * 100.0) / totalReviews;
         }
 
         return new AnalyticsResponseSummary(
@@ -337,13 +412,30 @@ public class ReviewProcessingService {
     public AnalyticsResponseSummary getAnalyticsSummary(
             Long repositoryId
     ) {
-        long totalReviews = reviewRepository.countByPullRequestRepositoryId(repositoryId);
-        long cacheHits = reviewRepository.countByPullRequestRepositoryIdAndCacheHitTrue(repositoryId);
-        List<Review> aiReviews =
-                reviewRepository.findByPullRequestRepositoryIdAndCacheHitFalse(
+
+        repositoryService.getOwnedRepository(
+                repositoryId
+        );
+
+        long totalReviews =
+                reviewRepository.countByPullRequestRepositoryId(
                         repositoryId
                 );
+
+        long cacheHits =
+                reviewRepository
+                        .countByPullRequestRepositoryIdAndCacheHitTrue(
+                                repositoryId
+                        );
+
+        List<Review> aiReviews =
+                reviewRepository
+                        .findByPullRequestRepositoryIdAndCacheHitFalse(
+                                repositoryId
+                        );
+
         double averageResponseTime = 0.0;
+
         if (!aiReviews.isEmpty()) {
             averageResponseTime =
                     aiReviews.stream()
@@ -353,10 +445,15 @@ public class ReviewProcessingService {
                             .average()
                             .orElse(0.0);
         }
+
         double cacheHitRate = 0.0;
+
         if (totalReviews > 0) {
-            cacheHitRate = (cacheHits * 100.0) / totalReviews;
+            cacheHitRate =
+                    (cacheHits * 100.0)
+                            / totalReviews;
         }
+
         return new AnalyticsResponseSummary(
                 totalReviews,
                 cacheHits,
@@ -368,6 +465,10 @@ public class ReviewProcessingService {
     public List<AnalyticsHistoryResponse> getAnalyticsHistory(
             Long repositoryId
     ) {
+        repositoryService.getOwnedRepository(
+                repositoryId
+        );
+
         return reviewRepository
                 .findByPullRequestRepositoryIdOrderByIdAsc(
                         repositoryId
@@ -384,90 +485,103 @@ public class ReviewProcessingService {
     }
     public SeverityResponse getSeverityDistribution() {
 
+        User user =
+                userService.getCurrentAuthenticatedUser();
+        Long userId = user.getId();
+
         return new SeverityResponse(
-                reviewCommentRepository.countBySeverity("HIGH"),
-                reviewCommentRepository.countBySeverity("MEDIUM"),
-                reviewCommentRepository.countBySeverity("LOW")
+                reviewCommentRepository
+                        .countByReviewPullRequestRepositoryUserIdAndSeverity(
+                                userId,
+                                "HIGH"
+                        ),
+                reviewCommentRepository
+                        .countByReviewPullRequestRepositoryUserIdAndSeverity(
+                                userId,
+                                "MEDIUM"
+                        ),
+                reviewCommentRepository
+                        .countByReviewPullRequestRepositoryUserIdAndSeverity(
+                                userId,
+                                "LOW"
+                        )
         );
-
     }
-    public List<TopProblemFileResponse> getTopProblemFiles() {
+    private ReviewCardReponse toReviewCardResponse(
+            Review review
+    ) {
 
-        Map<String, Long> issueCounts =
-                reviewCommentRepository.findAll()
-                        .stream()
-                        .collect(
-                                Collectors.groupingBy(
-                                        ReviewComment::getFileName,
-                                        Collectors.counting()
-                                )
-                        );
-
-        return issueCounts.entrySet()
+        int highCount = (int) review.getComments()
                 .stream()
-                .sorted(
-                        Map.Entry.<String, Long>comparingByValue(
-                                Comparator.reverseOrder()
-                        )
-                )
-                .limit(5)
-                .map(entry ->
-                        new TopProblemFileResponse(
-                                entry.getKey(),
-                                entry.getValue()
-                        )
-                )
-                .toList();
+                .filter(comment ->
+                        "HIGH".equalsIgnoreCase(
+                                comment.getSeverity()
+                        ))
+                .count();
 
+        int mediumCount = (int) review.getComments()
+                .stream()
+                .filter(comment ->
+                        "MEDIUM".equalsIgnoreCase(
+                                comment.getSeverity()
+                        ))
+                .count();
+
+        int lowCount = (int) review.getComments()
+                .stream()
+                .filter(comment ->
+                        "LOW".equalsIgnoreCase(
+                                comment.getSeverity()
+                        ))
+                .count();
+
+        return new ReviewCardReponse(
+                review.getId(),
+                review.getPullRequest().getPrNumber(),
+                review.getQualityScore(),
+                review.getStatus(),
+                review.getSummary(),
+                review.getPullRequest().getRepository().getName(),
+                highCount,
+                mediumCount,
+                lowCount,
+                review.getCacheHit(),
+                review.getResponseTimeMs(),
+                review.getModelName(),
+                review.getPullRequest()
+                        .getRepository()
+                        .getId()
+        );
     }
+
     public List<ReviewCardReponse> getAllReviews() {
 
-        return reviewRepository.findAll()
-                .stream()
-                .sorted(
-                        Comparator.comparing(
-                                Review::getId
-                        )
-                )
-                .map(review -> {
-                    int highCount = (int) review.getComments()
-                            .stream()
-                            .filter(comment ->
-                                    "HIGH".equalsIgnoreCase(
-                                            comment.getSeverity()
-                                    ))
-                            .count();
-                    int mediumCount = (int) review.getComments()
-                            .stream()
-                            .filter(comment ->
-                                    "MEDIUM".equalsIgnoreCase(
-                                            comment.getSeverity()
-                                    ))
-                            .count();
-                    int lowCount = (int) review.getComments()
-                            .stream()
-                            .filter(comment ->
-                                    "LOW".equalsIgnoreCase(
-                                            comment.getSeverity()
-                                    ))
-                            .count();
-                    return new ReviewCardReponse(
-                            review.getId(),
-                            review.getQualityScore(),
-                            review.getStatus(),
-                            review.getSummary(),
-                            review.getPullRequest()
-                                    .getRepository()
-                                    .getName(),
-                            highCount,
-                            mediumCount,
-                            lowCount,
-                            review.getCacheHit(),
-                            review.getResponseTimeMs(),
-                            review.getModelName()
-                    );
-                })
-                .toList();
+        User user =
+                userService.getCurrentAuthenticatedUser();
 
+        return reviewRepository
+                .findByPullRequestRepositoryUserIdOrderByIdDesc(
+                        user.getId()
+                )
+                .stream()
+                .map(this::toReviewCardResponse)
+                .toList();
+    }
+
+    public List<ReviewCardReponse> getReviewsByRepository(
+            Long repositoryId
+    ) {
+
+        repositoryService.getOwnedRepository(
+                repositoryId
+        );
+
+        return reviewRepository
+                .findByPullRequestRepositoryIdOrderByIdDesc(
+                        repositoryId
+                )
+                .stream()
+                .map(this::toReviewCardResponse)
+                .toList();
     }
 }

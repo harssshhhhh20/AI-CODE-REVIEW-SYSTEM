@@ -19,15 +19,11 @@ public class RepositoryController {
     private final RepositoryService repositoryService;
     private final ReviewProcessingService reviewProcessingService;
 
-    @PostMapping("/{userId}")
+    @PostMapping
     public CodeRepository createRepository(
-            @PathVariable Long userId,
-            @RequestBody CodeRepository repository){
+            @RequestBody CodeRepository repository) {
 
-        return repositoryService.createRepository(
-                userId,
-                repository
-        );
+        return repositoryService.createRepository(repository);
     }
 
     @GetMapping("/{repositoryId}/analytics")
@@ -45,8 +41,16 @@ public class RepositoryController {
         return reviewProcessingService
                 .getAnalyticsHistory(repositoryId);
     }
+
     @GetMapping
     public List<RepositoryResponse> getRepositories() {
         return repositoryService.getRepositories();
+    }
+
+    @DeleteMapping("/{id}")
+    public void deleteRepository(
+            @PathVariable Long id
+    ) {
+        repositoryService.deleteRepository(id);
     }
 }

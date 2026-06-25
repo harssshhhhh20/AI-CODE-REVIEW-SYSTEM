@@ -4,6 +4,8 @@ import com.fasterxml.jackson.annotation.JsonBackReference;
 import com.fasterxml.jackson.annotation.JsonManagedReference;
 import jakarta.persistence.*;
 import  lombok.*;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 
 import java.util.List;
 
@@ -24,10 +26,17 @@ public class User {
 
     private String username;
 
+    @Column(unique = true, nullable = false)
     private String email;
 
     @OneToMany(mappedBy = "user")
     private List<CodeRepository> repositories;
+
+    @Enumerated(EnumType.STRING)
+    private Role role;
+
+    @Column(nullable = false)
+    private String password;
 
 
 }

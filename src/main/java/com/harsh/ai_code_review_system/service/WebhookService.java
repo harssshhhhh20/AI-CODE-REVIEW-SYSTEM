@@ -3,6 +3,7 @@ package com.harsh.ai_code_review_system.service;
 import com.harsh.ai_code_review_system.dto.CreateGithubPullRequest;
 import com.harsh.ai_code_review_system.dto.GithubWebhookPayload;
 import com.harsh.ai_code_review_system.dto.PullRequestInfo;
+import com.harsh.ai_code_review_system.dto.ReviewJob;
 import com.harsh.ai_code_review_system.entity.CodeRepository;
 import com.harsh.ai_code_review_system.entity.PullRequest;
 import com.harsh.ai_code_review_system.entity.Review;
@@ -21,7 +22,7 @@ public class WebhookService {
     private final CodeRepositoryRepository codeRepositoryRepository;
     private final PullRequestRepository pullRequestRepository;
     private final ReviewRepository reviewRepository;
-    private final ReviewProcessingService reviewProcessingService;
+    private final ReviewPublisher reviewPublisher;
     private final GithubService githubService;
     private final HashService hashService;
 
@@ -81,15 +82,17 @@ public class WebhookService {
                 .build();
         Review savedReview = reviewRepository.save(review);
         reviewRepository.flush();
-        reviewProcessingService.processReview(savedReview.getId());
+        System.out.println("Publishing review: " + savedReview.getId());
+        reviewPublisher.publish(
+                new ReviewJob(
+                        savedReview.getId(),
+                        savedPullRequest.getId()
+                )
+        );
     }
 
     @Transactional
     public void processWebhook(GithubWebhookPayload payload) {
-        System.out.println("Received webhook: " + payload.action());
-        System.out.println("PR ID: " + payload.pull_request().id());
-        System.out.println("Title: " + payload.pull_request().title());
-        System.out.println("Author: " + payload.pull_request().user().login());
         if (!"opened".equals(payload.action())
                 && !"synchronize".equals(payload.action())) {
             return;
